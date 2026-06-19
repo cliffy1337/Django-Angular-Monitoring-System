@@ -68,13 +68,14 @@ USE_TZ = True
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-# Django 4.2+ STORAGES dict replaced the deprecated STATICFILES_STORAGE setting
+# Plain copy — safe for `runserver` without a prior `collectstatic`.
+# prod.py overrides staticfiles to CompressedManifestStaticFilesStorage.
 STORAGES = {
     "default": {
         "BACKEND": "django.core.files.storage.FileSystemStorage",
     },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
     },
 }
 

@@ -79,6 +79,31 @@ Angular 21 with standalone components and `inject()`-based DI (no constructor in
 
 The dev proxy (`proxy.conf.json`) rewrites `/api/*` to `http://localhost:8000`, so no CORS handling is needed during development.
 
+## Static Files
+
+Static files come from Django admin, DRF's browsable API, and drf-spectacular's Swagger UI — no project-level `STATICFILES_DIRS` are needed.
+
+`STATIC_ROOT` is `backend/staticfiles/` (gitignored, never committed).
+
+| Environment | Storage backend | `collectstatic` output |
+|---|---|---|
+| dev (`config.settings.dev`) | `StaticFilesStorage` | plain copy, no manifest — safe to `runserver` without running collectstatic first |
+| prod (`config.settings.prod`) | `whitenoise.storage.CompressedManifestStaticFilesStorage` | content-hashed filenames + `.gz` siblings + `staticfiles.json` manifest |
+
+`WhiteNoiseMiddleware` must remain in position 2 in `MIDDLEWARE` (immediately after `SecurityMiddleware`). It serves files from `STATIC_ROOT` at runtime.
+
+In Docker production the `backend/entrypoint.sh` runs `collectstatic --noinput` automatically before gunicorn starts. Running it manually:
+
+```bash
+# dev — plain copy
+python manage.py collectstatic --noinput
+
+# prod — hashed + gzipped (set required env vars first)
+DJANGO_SETTINGS_MODULE=config.settings.prod python manage.py collectstatic --noinput
+```
+
+`CompressedManifestStaticFilesStorage` raises `ValueError: Missing staticfiles.json manifest file` if gunicorn starts before `collectstatic` has run. The entrypoint prevents this in Docker; locally you must run it manually when using prod settings with gunicorn.
+
 ## Key Conventions
 
 - `Endpoint.is_active=False` suppresses both scheduling and idempotency checks — use this to pause monitoring without deletion.

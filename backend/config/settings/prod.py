@@ -31,6 +31,17 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
 
+# Static files: gzip compression + content-hash fingerprinting.
+# collectstatic MUST run before gunicorn starts (handled by entrypoint.sh).
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
 # SSL is terminated at the upstream proxy (nginx). Tell Django to trust the
 # X-Forwarded-Proto header that nginx sets, and never redirect here.
 SECURE_SSL_REDIRECT = False
