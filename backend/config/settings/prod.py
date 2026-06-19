@@ -31,12 +31,23 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default=EMAIL_HOST_USER)
 
-SECURE_SSL_REDIRECT = True
+# SSL is terminated at the upstream proxy (nginx). Tell Django to trust the
+# X-Forwarded-Proto header that nginx sets, and never redirect here.
+SECURE_SSL_REDIRECT = False
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 SESSION_COOKIE_SECURE = True
 CSRF_COOKIE_SECURE = True
-SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_HSTS_SECONDS = 31536000
+SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 X_FRAME_OPTIONS = 'DENY'
+
+CORS_ALLOWED_ORIGINS = config(
+    'CORS_ALLOWED_ORIGINS',
+    cast=lambda v: [s.strip() for s in v.split(',') if s.strip()],
+    default='',
+)
 
 LOGGING = {
     "version": 1,

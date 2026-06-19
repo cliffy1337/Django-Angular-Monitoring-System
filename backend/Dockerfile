@@ -5,10 +5,12 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# system deps
+# system deps: postgresql-client for pg_isready, curl for health checks
 RUN apt-get update && apt-get install -y \
     build-essential \
     libpq-dev \
+    postgresql-client \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 # dependency layer (CACHE CRITICAL)
@@ -19,6 +21,12 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY . .
 
 # runtime dirs
-RUN mkdir -p /app/logs
+RUN mkdir -p /app/logs /app/staticfiles \
+    && chmod +x /app/entrypoint.sh
 
-CMD ["gunicorn", "config.wsgi:application", "--bind", "0.0.0.0:8000"]
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["gunicorn", "config.wsgi:application", \
+     "--bind", "0.0.0.0:8000", \
+     "--workers", "2", \
+     "--timeout", "120", \
+     "--access-logfile", "-"]

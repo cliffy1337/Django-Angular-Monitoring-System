@@ -1,0 +1,90 @@
+services:
+
+  db:
+    image: postgres:15
+    command: postgres -c timezone=Africa/Lusaka
+    environment:
+      POSTGRES_DB:       ${POSTGRES_DB}
+      POSTGRES_USER:     ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  redis:
+    image: redis:7
+    command: redis-server --maxclients 3000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    # entrypoint.sh detects "gunicorn" as $1, runs migrate + collectstatic first
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  worker:
+    build: ./backend
+    command: celery -A config worker -l info --concurrency 2
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    env_file:
+      - .env
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  beat:
+    build: ./backend
+    command: celery -A config beat -l info
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.prod
+    env_file:
+      - .env
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost/ || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  postgres_data:
