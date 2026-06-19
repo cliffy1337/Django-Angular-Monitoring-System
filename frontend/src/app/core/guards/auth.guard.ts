@@ -15,3 +15,18 @@ export class AuthGuard implements CanActivate {
     return false;
   }
 }
+
+/** Redirects already-authenticated users away from /login and /register. */
+@Injectable({ providedIn: 'root' })
+export class GuestGuard implements CanActivate {
+  private authService = inject(AuthService);
+  private router = inject(Router);
+
+  canActivate(): boolean {
+    if (this.authService.isAuthenticated()) {
+      this.router.navigate(['/dashboard']);
+      return false;
+    }
+    return true;
+  }
+}

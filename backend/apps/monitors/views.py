@@ -1,7 +1,6 @@
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.shortcuts import get_object_or_404
 from .models import Endpoint, CheckResult, Incident
 from .serializers import EndpointSerializer, CheckResultSerializer, IncidentSerializer
 from .permissions import IsOwnerOrReadOnly
@@ -18,10 +17,8 @@ class EndpointViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def check_now(self, request, pk=None):
-        endpoint = self.get_object()
-        # We'll implement Celery task later; for now just return ack
-        from .tasks import check_endpoint  # will be created later
-        check_endpoint.delay(endpoint.id)
+        from .tasks import check_endpoint
+        check_endpoint.delay(self.get_object().id)
         return Response({'status': 'check queued'}, status=status.HTTP_202_ACCEPTED)
 
 class CheckResultViewSet(viewsets.ReadOnlyModelViewSet):
@@ -44,6 +41,17 @@ class IncidentViewSet(viewsets.ReadOnlyModelViewSet):
 
     @action(detail=True, methods=['post'])
     def resend_alert(self, request, pk=None):
+        """Queue an alert email for this incident.
+
+        Sends a DOWN alert for unresolved incidents and a resolution alert for
+        resolved ones.  Subject to the per-endpoint alert cooldown — the task
+        logs and skips silently if the cooldown has not elapsed.
+        """
+        from .tasks import send_alert_email
         incident = self.get_object()
-        # We'll implement email resend later
-        return Response({'status': 'alert resend queued'}, status=status.HTTP_202_ACCEPTED)
+        send_alert_email.delay(
+            incident.endpoint_id,
+            incident.id,
+            is_resolved=incident.resolved,
+        )
+        return Response({'status': 'alert queued'}, status=status.HTTP_202_ACCEPTED)

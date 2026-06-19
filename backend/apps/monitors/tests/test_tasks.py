@@ -16,11 +16,11 @@ class TasksTest(TestCase):
             interval_minutes=5
         )
 
-    @patch('apps.monitors.tasks.requests.get')
-    def test_check_endpoint_up(self, mock_get):
+    @patch('apps.monitors.tasks.safe_get_request')
+    def test_check_endpoint_up(self, mock_request):
         mock_response = Mock()
         mock_response.status_code = 200
-        mock_get.return_value = mock_response
+        mock_request.return_value = mock_response
 
         check_endpoint(self.endpoint.id)
         self.assertTrue(CheckResult.objects.filter(endpoint=self.endpoint, is_up=True).exists())

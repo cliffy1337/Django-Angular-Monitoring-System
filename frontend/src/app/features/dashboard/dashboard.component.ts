@@ -10,11 +10,34 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatSlideToggleModule } from '@angular/material/slide-toggle';
 import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
+import { MatProgressBarModule } from '@angular/material/progress-bar';
+import { forkJoin } from 'rxjs';
+import { finalize } from 'rxjs/operators';
 import { Chart, registerables } from 'chart.js';
 import { EndpointService, Endpoint } from '../../core/services/endpoint.service';
 import { CheckService, CheckResult } from '../../core/services/check.service';
+import { AuthService } from '../../core/services/auth.service';
 
 Chart.register(...registerables);
+
+interface StatusInfo {
+  label: string;
+  icon: string;
+  cssClass: string;
+}
+
+interface EndpointRow {
+  endpoint: Endpoint;
+  check: CheckResult | undefined;
+  status: StatusInfo;
+}
+
+function endpointStatus(check: CheckResult | undefined): StatusInfo {
+  if (!check) return { label: 'Pending', icon: 'schedule', cssClass: 'status-pending' };
+  return check.is_up
+    ? { label: 'Up',   icon: 'check_circle', cssClass: 'status-up'   }
+    : { label: 'Down', icon: 'cancel',        cssClass: 'status-down' };
+}
 
 @Component({
   selector: 'app-dashboard',
@@ -22,103 +45,188 @@ Chart.register(...registerables);
   imports: [
     CommonModule, ReactiveFormsModule,
     MatCardModule, MatButtonModule, MatIconModule, MatTableModule, MatDialogModule,
-    MatFormFieldModule, MatInputModule, MatSlideToggleModule, MatSnackBarModule
+    MatFormFieldModule, MatInputModule, MatSlideToggleModule, MatSnackBarModule,
+    MatProgressBarModule,
   ],
   template: `
     <div class="dashboard">
       <div class="header">
         <h1>Uptime Monitor</h1>
-        <button mat-raised-button color="primary" (click)="openEndpointForm()">+ Add Endpoint</button>
+        <div class="header-actions">
+          <button mat-raised-button color="primary" (click)="openEndpointForm()">+ Add Endpoint</button>
+          <button mat-stroked-button (click)="logout()">Logout</button>
+        </div>
       </div>
 
-      <div class="summary">
-        <mat-card>
-          <mat-card-title>Total Endpoints</mat-card-title>
-          <div class="big-number">{{ endpoints().length }}</div>
-        </mat-card>
-        <mat-card>
-          <mat-card-title>Up Now</mat-card-title>
-          <div class="big-number">{{ upCount() }}</div>
-        </mat-card>
-        <mat-card>
-          <mat-card-title>Down Now</mat-card-title>
-          <div class="big-number">{{ downCount() }}</div>
-        </mat-card>
-      </div>
+      @if (loading()) {
+        <mat-progress-bar mode="indeterminate" aria-label="Loading dashboard data"></mat-progress-bar>
+      }
 
-      <mat-card>
-        <mat-card-title>Response Time (last 20 checks)</mat-card-title>
-        <canvas id="responseChart"></canvas>
-      </mat-card>
+      @if (!loading()) {
+        <div class="summary" role="region" aria-label="Summary">
+          <mat-card>
+            <mat-card-content>
+              <div class="stat-label">Total</div>
+              <div class="big-number">{{ rows().length }}</div>
+            </mat-card-content>
+          </mat-card>
+          <mat-card>
+            <mat-card-content>
+              <div class="stat-label">Up</div>
+              <div class="big-number">{{ upCount() }}</div>
+            </mat-card-content>
+          </mat-card>
+          <mat-card>
+            <mat-card-content>
+              <div class="stat-label">Down</div>
+              <div class="big-number">{{ downCount() }}</div>
+            </mat-card-content>
+          </mat-card>
+        </div>
+      }
 
-      <mat-card>
-        <mat-card-title>Endpoints</mat-card-title>
-        <table mat-table [dataSource]="endpoints()" class="mat-elevation-z0">
-          <ng-container matColumnDef="name">
-            <th mat-header-cell *matHeaderCellDef> Name </th>
-            <td mat-cell *matCellDef="let e"> {{e.name}} </td>
-          </ng-container>
-          <ng-container matColumnDef="url">
-            <th mat-header-cell *matHeaderCellDef> URL </th>
-            <td mat-cell *matCellDef="let e"> {{e.url}} </td>
-          </ng-container>
-          <ng-container matColumnDef="status">
-            <th mat-header-cell *matHeaderCellDef> Status </th>
-            <td mat-cell *matCellDef="let e">
-              <span [class.up]="getLastStatus(e)?.is_up" [class.down]="!getLastStatus(e)?.is_up">
-                {{ getLastStatus(e)?.is_up ? 'UP' : 'DOWN' }}
-              </span>
-            </td>
-          </ng-container>
-          <ng-container matColumnDef="actions">
-            <th mat-header-cell *matHeaderCellDef> Actions </th>
-            <td mat-cell *matCellDef="let e">
-              <button mat-icon-button (click)="checkNow(e.id)" title="Check now"><mat-icon>refresh</mat-icon></button>
-              <button mat-icon-button (click)="openEndpointForm(e)" title="Edit"><mat-icon>edit</mat-icon></button>
-              <button mat-icon-button color="warn" (click)="deleteEndpoint(e.id)" title="Delete"><mat-icon>delete</mat-icon></button>
-            </td>
-          </ng-container>
-          <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
-          <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
-        </table>
-      </mat-card>
+      @if (!loading() && rows().length === 0) {
+        <mat-card class="empty-state">
+          <mat-card-content>
+            <mat-icon class="empty-icon" aria-hidden="true">monitor_heart</mat-icon>
+            <h2>No endpoints yet</h2>
+            <p>Add an endpoint to start monitoring uptime.</p>
+            <button mat-raised-button color="primary" (click)="openEndpointForm()">
+              Add your first endpoint
+            </button>
+          </mat-card-content>
+        </mat-card>
+      }
+
+      @if (!loading() && checks().length > 0) {
+        <mat-card>
+          <mat-card-title>Response Time (last 20 checks)</mat-card-title>
+          <canvas id="responseChart" aria-label="Response time chart" role="img"></canvas>
+        </mat-card>
+      }
+
+      @if (!loading() && rows().length > 0) {
+        <mat-card>
+          <mat-card-title>Endpoints</mat-card-title>
+          <table mat-table [dataSource]="rows()" class="mat-elevation-z0" aria-label="Monitored endpoints">
+
+            <ng-container matColumnDef="name">
+              <th mat-header-cell *matHeaderCellDef>Name</th>
+              <td mat-cell *matCellDef="let row">{{ row.endpoint.name }}</td>
+            </ng-container>
+
+            <ng-container matColumnDef="url">
+              <th mat-header-cell *matHeaderCellDef>URL</th>
+              <td mat-cell *matCellDef="let row">{{ row.endpoint.url }}</td>
+            </ng-container>
+
+            <ng-container matColumnDef="status">
+              <th mat-header-cell *matHeaderCellDef>Status</th>
+              <td mat-cell *matCellDef="let row">
+                <span [ngClass]="row.status.cssClass" class="status-badge">
+                  <mat-icon class="badge-icon" aria-hidden="true">{{ row.status.icon }}</mat-icon>
+                  {{ row.status.label }}
+                </span>
+              </td>
+            </ng-container>
+
+            <ng-container matColumnDef="actions">
+              <th mat-header-cell *matHeaderCellDef>Actions</th>
+              <td mat-cell *matCellDef="let row">
+                <button mat-icon-button
+                        [attr.aria-label]="'Trigger check for ' + row.endpoint.name"
+                        (click)="checkNow(row.endpoint.id)">
+                  <mat-icon>refresh</mat-icon>
+                </button>
+                <button mat-icon-button
+                        [attr.aria-label]="'Edit ' + row.endpoint.name"
+                        (click)="openEndpointForm(row.endpoint)">
+                  <mat-icon>edit</mat-icon>
+                </button>
+                <button mat-icon-button color="warn"
+                        [attr.aria-label]="'Delete ' + row.endpoint.name"
+                        (click)="deleteEndpoint(row.endpoint.id)">
+                  <mat-icon>delete</mat-icon>
+                </button>
+              </td>
+            </ng-container>
+
+            <tr mat-header-row *matHeaderRowDef="displayedColumns"></tr>
+            <tr mat-row *matRowDef="let row; columns: displayedColumns;"></tr>
+          </table>
+        </mat-card>
+      }
     </div>
   `,
   styles: [`
     .dashboard { padding: 20px; max-width: 1200px; margin: 0 auto; }
+
     .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
-    .summary { display: flex; gap: 20px; margin-bottom: 30px; }
-    .summary mat-card { flex: 1; text-align: center; }
-    .big-number { font-size: 48px; font-weight: bold; margin-top: 10px; }
-    .up { color: green; font-weight: bold; }
-    .down { color: red; font-weight: bold; }
+    .header-actions { display: flex; gap: 8px; align-items: center; }
+
+    .summary { display: flex; gap: 16px; margin-bottom: 24px; }
+    .summary mat-card { flex: 1; }
+    .stat-label {
+      font-size: 11px; font-weight: 500; letter-spacing: 0.08em;
+      text-transform: uppercase; color: rgba(0,0,0,0.54);
+    }
+    .big-number { font-size: 48px; font-weight: 300; line-height: 1.2; margin-top: 4px; }
+
+    mat-card { margin-bottom: 24px; }
     table { width: 100%; }
-    mat-card { margin-bottom: 30px; padding: 20px; }
-  `]
+
+    .status-badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-weight: 500; font-size: 14px;
+    }
+    .badge-icon { font-size: 16px; width: 16px; height: 16px; line-height: 16px; }
+    .status-up   { color: #2e7d32; }
+    .status-down { color: #b71c1c; }
+    .status-pending { color: #757575; }
+
+    .empty-state { text-align: center; padding: 48px 24px; }
+    .empty-icon {
+      font-size: 56px; width: 56px; height: 56px;
+      color: rgba(0,0,0,0.26); display: block; margin: 0 auto 16px;
+    }
+    .empty-state h2 { margin: 0 0 8px; font-weight: 400; }
+    .empty-state p  { color: rgba(0,0,0,0.54); margin: 0 0 24px; }
+  `],
 })
 export class DashboardComponent implements OnInit {
   private endpointService = inject(EndpointService);
-  private checkService = inject(CheckService);
-  private dialog = inject(MatDialog);
-  private snackBar = inject(MatSnackBar);
+  private checkService    = inject(CheckService);
+  private authService     = inject(AuthService);
+  private dialog          = inject(MatDialog);
+  private snackBar        = inject(MatSnackBar);
 
   endpoints = signal<Endpoint[]>([]);
-  checks = signal<CheckResult[]>([]);
+  checks    = signal<CheckResult[]>([]);
+  loading   = signal(true);
+
   displayedColumns = ['name', 'url', 'status', 'actions'];
   chart: Chart | null = null;
 
-  upCount = computed(() => {
-    return this.endpoints().filter(e => this.getLastStatus(e)?.is_up).length;
+  private checkMap = computed(() => {
+    const map = new Map<string, CheckResult>();
+    for (const c of this.checks()) {
+      if (!map.has(c.endpoint)) map.set(c.endpoint, c);
+    }
+    return map;
   });
 
-  downCount = computed(() => {
-    return this.endpoints().length - this.upCount();
-  });
+  rows = computed<EndpointRow[]>(() =>
+    this.endpoints().map(e => {
+      const check = this.checkMap().get(e.id);
+      return { endpoint: e, check, status: endpointStatus(check) };
+    })
+  );
+
+  upCount   = computed(() => this.rows().filter(r => r.check?.is_up === true).length);
+  downCount = computed(() => this.rows().filter(r => r.check?.is_up === false).length);
 
   constructor() {
-    effect(() => {
-      this.updateChart();
-    });
+    effect(() => { this.updateChart(); });
   }
 
   ngOnInit() {
@@ -126,26 +234,19 @@ export class DashboardComponent implements OnInit {
   }
 
   loadData() {
-    this.endpointService.list().subscribe({
-      next: (endpoints) => {
+    this.loading.set(true);
+    forkJoin({
+      endpoints: this.endpointService.list(),
+      checks:    this.checkService.list(),
+    }).pipe(
+      finalize(() => this.loading.set(false)),
+    ).subscribe({
+      next: ({ endpoints, checks }) => {
         this.endpoints.set(endpoints);
-        this.loadChecks();
-      },
-      error: () => this.snackBar.open('Failed to load endpoints', 'Close', { duration: 3000 })
-    });
-  }
-
-  loadChecks() {
-    this.checkService.list().subscribe({
-      next: (checks) => {
         this.checks.set(checks);
       },
-      error: () => this.snackBar.open('Failed to load checks', 'Close', { duration: 3000 })
+      error: () => this.snackBar.open('Failed to load data', 'Close', { duration: 3000 }),
     });
-  }
-
-  getLastStatus(endpoint: Endpoint): CheckResult | undefined {
-    return this.checks().find(c => c.endpoint === endpoint.id);
   }
 
   updateChart() {
@@ -161,49 +262,34 @@ export class DashboardComponent implements OnInit {
             label: 'Response time (ms)',
             data: latestChecks.map(c => c.response_time_ms),
             borderColor: '#3f51b5',
-            fill: false
-          }]
-        }
+            fill: false,
+          }],
+        },
       });
     }
   }
 
   openEndpointForm(endpoint?: Endpoint) {
     const dialogRef = this.dialog.open(EndpointFormDialog, {
-      data: endpoint || { name: '', url: '', interval_minutes: 5, is_active: true }
+      data: endpoint ?? { name: '', url: '', interval_minutes: 5, is_active: true },
     });
 
     dialogRef.afterClosed().subscribe(result => {
-      if (result) {
-        // Fix: Ensure URL has protocol and interval is a number
-        let finalUrl = result.url.trim();
-        if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
-          finalUrl = 'https://' + finalUrl;
-        }
+      if (!result) return;
+      let url = result.url.trim();
+      if (!url.startsWith('http://') && !url.startsWith('https://')) url = 'https://' + url;
+      const payload = { ...result, url, interval_minutes: Number(result.interval_minutes) };
 
-        const payload = {
-          ...result,
-          url: finalUrl,
-          interval_minutes: Number(result.interval_minutes)
-        };
-
-        if (endpoint?.id) {
-          this.endpointService.update(endpoint.id, payload).subscribe({
-            next: () => {
-              this.snackBar.open('Endpoint updated', 'Close', { duration: 2000 });
-              this.loadData();
-            },
-            error: () => this.snackBar.open('Update failed', 'Close', { duration: 3000 })
-          });
-        } else {
-          this.endpointService.create(payload).subscribe({
-            next: () => {
-              this.snackBar.open('Endpoint created', 'Close', { duration: 2000 });
-              this.loadData();
-            },
-            error: () => this.snackBar.open('Creation failed', 'Close', { duration: 3000 })
-          });
-        }
+      if (endpoint?.id) {
+        this.endpointService.update(endpoint.id, payload).subscribe({
+          next: () => { this.snackBar.open('Endpoint updated', 'Close', { duration: 2000 }); this.loadData(); },
+          error: () => this.snackBar.open('Update failed', 'Close', { duration: 3000 }),
+        });
+      } else {
+        this.endpointService.create(payload).subscribe({
+          next: () => { this.snackBar.open('Endpoint created', 'Close', { duration: 2000 }); this.loadData(); },
+          error: () => this.snackBar.open('Creation failed', 'Close', { duration: 3000 }),
+        });
       }
     });
   }
@@ -214,7 +300,7 @@ export class DashboardComponent implements OnInit {
         this.snackBar.open('Check queued', 'Close', { duration: 2000 });
         setTimeout(() => this.loadData(), 2000);
       },
-      error: () => this.snackBar.open('Failed to trigger check', 'Close', { duration: 3000 })
+      error: () => this.snackBar.open('Failed to trigger check', 'Close', { duration: 3000 }),
     });
   }
 
@@ -222,23 +308,26 @@ export class DashboardComponent implements OnInit {
     if (confirm('Delete this endpoint?')) {
       this.endpointService.delete(id).subscribe({
         next: () => this.loadData(),
-        error: () => this.snackBar.open('Delete failed', 'Close', { duration: 3000 })
+        error: () => this.snackBar.open('Delete failed', 'Close', { duration: 3000 }),
       });
     }
   }
+
+  logout() {
+    this.authService.logout();
+  }
 }
+
+// ---------------------------------------------------------------------------
+// Endpoint form dialog (unchanged)
+// ---------------------------------------------------------------------------
 
 @Component({
   selector: 'endpoint-form-dialog',
   standalone: true,
   imports: [
-    CommonModule,
-    ReactiveFormsModule,
-    MatDialogModule,
-    MatFormFieldModule,
-    MatInputModule,
-    MatButtonModule,
-    MatSlideToggleModule
+    CommonModule, ReactiveFormsModule, MatDialogModule,
+    MatFormFieldModule, MatInputModule, MatButtonModule, MatSlideToggleModule,
   ],
   template: `
     <h2 mat-dialog-title>{{ data.id ? 'Edit' : 'Add' }} Endpoint</h2>
@@ -271,7 +360,7 @@ export class DashboardComponent implements OnInit {
   styles: [`
     mat-form-field { width: 100%; margin-bottom: 16px; }
     mat-slide-toggle { margin: 16px 0; display: block; }
-  `]
+  `],
 })
 export class EndpointFormDialog {
   form: FormGroup;
@@ -279,20 +368,17 @@ export class EndpointFormDialog {
   constructor(
     private fb: FormBuilder,
     public dialogRef: MatDialogRef<EndpointFormDialog>,
-    @Inject(MAT_DIALOG_DATA) public data: any
+    @Inject(MAT_DIALOG_DATA) public data: any,
   ) {
     this.form = this.fb.group({
-      name: [data?.name || '', Validators.required],
-      // Regex pattern to enforce protocol requirement
-      url: [data?.url || '', [Validators.required, Validators.pattern('^https?://.+')]],
-      interval_minutes: [data?.interval_minutes || 5, [Validators.required, Validators.min(1)]],
-      is_active: [data?.is_active !== undefined ? data.is_active : true]
+      name:             [data?.name             ?? '',    Validators.required],
+      url:              [data?.url              ?? '',    [Validators.required, Validators.pattern('^https?://.+')]],
+      interval_minutes: [data?.interval_minutes ?? 5,    [Validators.required, Validators.min(1)]],
+      is_active:        [data?.is_active        ?? true],
     });
   }
 
   save() {
-    if (this.form.valid) {
-      this.dialogRef.close(this.form.value);
-    }
+    if (this.form.valid) this.dialogRef.close(this.form.value);
   }
 }

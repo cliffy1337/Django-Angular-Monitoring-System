@@ -49,3 +49,14 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:4200",
 ]
 CORS_ALLOW_CREDENTIALS = True
+
+# Relax throttle limits so they don't interfere with local development or test runs.
+# The account lockout mechanism (cache-based) still applies at its configured thresholds.
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '10000/hour',
+        'user': '100000/hour',
+        'login': '1000/minute',
+    },
+}

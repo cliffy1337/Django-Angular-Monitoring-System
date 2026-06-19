@@ -8,6 +8,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 
 @Component({
   selector: 'app-register',
@@ -20,7 +21,8 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
     MatFormFieldModule,
     MatInputModule,
     MatButtonModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    MatSnackBarModule,
   ],
   template: `
     <div class="register-container">
@@ -74,6 +76,7 @@ export class RegisterComponent {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private snackBar = inject(MatSnackBar);
 
   registerForm = this.fb.group({
     username: ['', Validators.required],
@@ -95,19 +98,20 @@ export class RegisterComponent {
     this.isLoading = true;
     const { username, email, password } = this.registerForm.value;
     this.authService.register(username!, email!, password!).subscribe({
-      next: () => {
-        this.router.navigate(['/dashboard']);
-      },
+      next: () => this.router.navigate(['/dashboard']),
       error: (err) => {
-        console.error(err);
-        let errorMsg = 'Registration failed. ';
-        if (err.error?.username) errorMsg += err.error.username[0];
-        else if (err.error?.email) errorMsg += err.error.email[0];
-        else errorMsg += 'Please try again.';
-        alert(errorMsg);
+        // Surface backend validation in priority order: password > username > email > generic
+        const e = err.error || {};
+        const msg =
+          e.password?.[0] ||
+          e.username?.[0] ||
+          e.email?.[0] ||
+          e.detail ||
+          'Registration failed. Please try again.';
+        this.snackBar.open(msg, 'Dismiss', { duration: 5000 });
         this.isLoading = false;
       },
-      complete: () => (this.isLoading = false)
+      complete: () => (this.isLoading = false),
     });
   }
 }

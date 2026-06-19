@@ -23,6 +23,10 @@ app.conf.beat_schedule = {
         'task': 'apps.monitors.tasks.schedule_checks',
         'schedule': crontab(minute='*/5'),
     },
+    'retry-failed-emails-every-2-minutes': {
+        'task': 'apps.monitors.tasks.retry_failed_emails',
+        'schedule': crontab(minute='*/2'),
+    },
 }
 
 # Optional but recommended for consistency

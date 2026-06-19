@@ -8,6 +8,7 @@ import { MatFormFieldModule } from '@angular/material/form-field';
 import { MatInputModule } from '@angular/material/input';
 import { MatButtonModule } from '@angular/material/button';
 import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
+import { MatSnackBar, MatSnackBarModule } from '@angular/material/snack-bar';
 
 @Component({
   selector: 'app-login',
@@ -20,7 +21,8 @@ import { MatProgressSpinnerModule } from '@angular/material/progress-spinner';
     MatFormFieldModule,
     MatInputModule,
     MatButtonModule,
-    MatProgressSpinnerModule
+    MatProgressSpinnerModule,
+    MatSnackBarModule,
   ],
   template: `
     <div class="login-container">
@@ -61,6 +63,7 @@ export class LoginComponent {
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private router = inject(Router);
+  private snackBar = inject(MatSnackBar);
 
   loginForm = this.fb.group({
     username: ['', Validators.required],
@@ -74,15 +77,14 @@ export class LoginComponent {
     this.isLoading = true;
     const { username, password } = this.loginForm.value;
     this.authService.login(username!, password!).subscribe({
-      next: () => {
-        this.router.navigate(['/dashboard']);
-      },
+      next: () => this.router.navigate(['/dashboard']),
       error: (err) => {
-        console.error(err);
-        alert('Login failed. Check credentials.');
+        const e = err.error || {};
+        const msg = e.detail || e.non_field_errors?.[0] || 'Login failed. Check your credentials.';
+        this.snackBar.open(msg, 'Dismiss', { duration: 4000 });
         this.isLoading = false;
       },
-      complete: () => (this.isLoading = false)
+      complete: () => (this.isLoading = false),
     });
   }
 }

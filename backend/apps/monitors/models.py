@@ -66,10 +66,28 @@ class FailedEmail(models.Model):
     next_retry_at = models.DateTimeField()
     created_at = models.DateTimeField(auto_now_add=True)
     last_attempt_at = models.DateTimeField(null=True, blank=True)
+    error_message = models.TextField(blank=True, default='')
     success_at = models.DateTimeField(null=True, blank=True)
+    exhausted_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['next_retry_at']
+        indexes = [
+            # Fast lookup for the DLQ processor: pending rows due for retry
+            models.Index(
+                fields=['next_retry_at'],
+                condition=models.Q(success_at__isnull=True, exhausted_at__isnull=True),
+                name='failedemail_pending_idx',
+            ),
+        ]
+
+    @property
+    def status(self) -> str:
+        if self.success_at:
+            return 'sent'
+        if self.exhausted_at:
+            return 'exhausted'
+        return 'pending'
 
     def __str__(self):
-        return f"Email to {self.to_email} - retry {self.retry_count}"
+        return f"FailedEmail to {self.to_email} [{self.status}] (attempt {self.retry_count})"

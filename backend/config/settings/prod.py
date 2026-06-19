@@ -60,6 +60,25 @@ CORS_ALLOWED_ORIGINS = config(
     default='',
 )
 
+# Redis cache — shared across all backend processes so throttle counters and
+# lockout state are consistent even with multiple Gunicorn workers.
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': config('REDIS_URL'),
+    }
+}
+
+# Tighter throttle limits for production
+REST_FRAMEWORK = {
+    **REST_FRAMEWORK,
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/hour',
+        'user': '2000/hour',
+        'login': '5/minute',
+    },
+}
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,

@@ -1,10 +1,14 @@
+import logging
+from datetime import timedelta
+
 import requests
 from celery import shared_task
-from django.utils import timezone
-from django.core.mail import send_mail
 from django.conf import settings
+from django.core.mail import send_mail
+from django.utils import timezone
+
 from .models import Endpoint, CheckResult, Incident, FailedEmail
-import logging
+from .ssrf import SSRFError, safe_get_request
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +32,17 @@ def check_endpoint(self, endpoint_id):
     # Perform HTTP check
     start_time = timezone.now()
     try:
-        response = requests.get(endpoint.url, timeout=10)
-        is_up = response.status_code < 500  # consider 4xx as down? You decide, but let's treat <500 as up
+        response = safe_get_request(endpoint.url, timeout=10)
+        is_up = response.status_code < 500
         status_code = response.status_code
         response_time = int((timezone.now() - start_time).total_seconds() * 1000)
+    except SSRFError as e:
+        # URL resolves to a private/reserved address (DNS rebinding or stale data).
+        # Do not connect; record a failed check and log a security warning.
+        logger.warning("SSRF blocked for endpoint %s (%s): %s", endpoint.name, endpoint.url, e)
+        is_up = False
+        status_code = None
+        response_time = None
     except requests.RequestException as e:
         is_up = False
         status_code = None
@@ -111,19 +122,18 @@ def send_alert_email(self, endpoint_id, incident_id, is_resolved):
         )
         endpoint.last_alert_sent_at = timezone.now()
         endpoint.save(update_fields=['last_alert_sent_at'])
-        logger.info(f"Alert email sent for {endpoint.name} to {endpoint.user.email}")
+        logger.info("Alert email sent for %s to %s", endpoint.name, endpoint.user.email)
     except Exception as e:
-        logger.error(f"Failed to send email: {e}")
-        # Store in dead letter queue for later retry
+        logger.error("Failed to send alert email for %s: %s", endpoint.name, e)
+        base_delay = getattr(settings, 'FAILED_EMAIL_BASE_DELAY_MINUTES', 5)
         FailedEmail.objects.create(
             to_email=endpoint.user.email,
             subject=subject,
-            body=message,
+            body=message.strip(),
             retry_count=0,
-            next_retry_at=timezone.now() + timezone.timedelta(minutes=5),
+            error_message=str(e)[:500],
+            next_retry_at=timezone.now() + timedelta(minutes=base_delay),
         )
-        # Retry the task
-        raise self.retry(exc=e)
 
 @shared_task
 def schedule_checks():
@@ -131,4 +141,93 @@ def schedule_checks():
     endpoints = Endpoint.objects.filter(is_active=True)
     for endpoint in endpoints:
         check_endpoint.delay(endpoint.id)
-    logger.info(f"Scheduled checks for {endpoints.count()} endpoints")
+    logger.info("Scheduled checks for %d endpoints", endpoints.count())
+
+
+@shared_task
+def retry_failed_emails():
+    """
+    Dead-letter queue processor for failed alert emails.
+
+    Picks up every FailedEmail whose next_retry_at is in the past and that has
+    not already succeeded or been exhausted, then:
+      - On success  → marks success_at.
+      - On failure  → increments retry_count, stores error_message, and
+                      schedules the next attempt with exponential backoff
+                      (base * 2^count, capped at 720 minutes).
+      - On exhaust  → sets exhausted_at when retry_count reaches the limit.
+
+    Returns a metrics dict for logging and Celery result inspection.
+    """
+    max_retries = getattr(settings, 'FAILED_EMAIL_MAX_RETRIES', 8)
+    base_delay = getattr(settings, 'FAILED_EMAIL_BASE_DELAY_MINUTES', 5)
+    max_delay = 720  # 12 hours
+
+    now = timezone.now()
+    pending = FailedEmail.objects.filter(
+        success_at__isnull=True,
+        exhausted_at__isnull=True,
+        next_retry_at__lte=now,
+        retry_count__lt=max_retries,
+    )
+
+    total = pending.count()
+    sent = rescheduled = exhausted = 0
+
+    logger.info("DLQ: %d failed email(s) due for retry", total)
+
+    for record in pending:
+        try:
+            send_mail(
+                subject=record.subject,
+                message=record.body,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[record.to_email],
+                fail_silently=False,
+            )
+            record.success_at = now
+            record.last_attempt_at = now
+            record.save(update_fields=['success_at', 'last_attempt_at'])
+            sent += 1
+            logger.info(
+                "DLQ: delivered to %s after %d attempt(s)",
+                record.to_email, record.retry_count + 1,
+            )
+        except Exception as exc:
+            record.retry_count += 1
+            record.last_attempt_at = now
+            record.error_message = str(exc)[:500]
+
+            if record.retry_count >= max_retries:
+                record.exhausted_at = now
+                record.save(update_fields=[
+                    'retry_count', 'last_attempt_at', 'error_message', 'exhausted_at',
+                ])
+                exhausted += 1
+                logger.error(
+                    "DLQ: exhausted retries for %s after %d attempt(s) — last error: %s",
+                    record.to_email, record.retry_count, exc,
+                )
+            else:
+                delay = min(base_delay * (2 ** record.retry_count), max_delay)
+                record.next_retry_at = now + timedelta(minutes=delay)
+                record.save(update_fields=[
+                    'retry_count', 'last_attempt_at', 'error_message', 'next_retry_at',
+                ])
+                rescheduled += 1
+                logger.warning(
+                    "DLQ: attempt %d/%d failed for %s, retry in %d min — %s",
+                    record.retry_count, max_retries, record.to_email, delay, exc,
+                )
+
+    metrics = {
+        'processed': total,
+        'sent': sent,
+        'rescheduled': rescheduled,
+        'exhausted': exhausted,
+    }
+    logger.info(
+        "DLQ complete — processed=%d sent=%d rescheduled=%d exhausted=%d",
+        total, sent, rescheduled, exhausted,
+    )
+    return metrics

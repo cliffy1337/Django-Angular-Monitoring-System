@@ -81,31 +81,58 @@ STORAGES = {
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-
-SPECTACULAR_SETTINGS = {
-    'TITLE': 'Vigil API',
-    'DESCRIPTION': 'Uptime monitor with email alerts',
-    'VERSION': '1.0.0',
-}
-
 # Custom user model
 AUTH_USER_MODEL = 'accounts.User'
 
-# DRF Configuration
+# -------------------------------------------------------------------------
+# Cache — LocMemCache for dev/test; prod.py overrides to Redis
+# -------------------------------------------------------------------------
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+    }
+}
+
+# -------------------------------------------------------------------------
+# Authentication security
+# -------------------------------------------------------------------------
+AUTH_TOKEN_EXPIRY_HOURS = 24       # tokens older than this are rejected and deleted
+AUTH_MAX_LOGIN_ATTEMPTS = 5        # consecutive failures before lockout
+AUTH_LOCKOUT_DURATION = 900        # lockout window in seconds (15 minutes)
+
+# -------------------------------------------------------------------------
+# Dead-letter queue — failed alert email retry
+# -------------------------------------------------------------------------
+FAILED_EMAIL_MAX_RETRIES = 8          # give up after this many attempts
+FAILED_EMAIL_BASE_DELAY_MINUTES = 5   # first retry delay; doubles each attempt (cap: 720 min)
+
+# -------------------------------------------------------------------------
+# DRF
+# -------------------------------------------------------------------------
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
-        'rest_framework.authentication.TokenAuthentication',
-        'rest_framework.authentication.SessionAuthentication',  # for browsable API
+        # ExpiringTokenAuthentication wraps DRF's TokenAuthentication with a
+        # 24-hour expiry check (configurable via AUTH_TOKEN_EXPIRY_HOURS).
+        'apps.accounts.authentication.ExpiringTokenAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
+    'DEFAULT_THROTTLE_CLASSES': [
+        'rest_framework.throttling.AnonRateThrottle',
+        'rest_framework.throttling.UserRateThrottle',
+    ],
+    'DEFAULT_THROTTLE_RATES': {
+        'anon': '100/hour',
+        'user': '2000/hour',
+        'login': '10/minute',   # tightened further in prod.py
+    },
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
     'PAGE_SIZE': 20,
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
-# Spectacular (Swagger) settings
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Vigil API',
     'DESCRIPTION': 'Uptime monitoring system API',
