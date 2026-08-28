@@ -95,9 +95,16 @@ class LoginView(ObtainAuthToken):
 
     @staticmethod
     def _get_client_ip(request):
+        # nginx sets X-Forwarded-For via $proxy_add_x_forwarded_for, which
+        # appends the real connecting IP as the *last* entry. Any earlier
+        # entries come from the client's own request headers and are
+        # attacker-controlled, so trusting the first entry would let a
+        # client spoof its IP and dodge (or frame someone else for) the
+        # lockout. There is exactly one proxy hop in this deployment, so
+        # the rightmost entry is always the trustworthy one.
         forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
         if forwarded_for:
-            return forwarded_for.split(',')[0].strip()
+            return forwarded_for.split(',')[-1].strip()
         return request.META.get('REMOTE_ADDR', '')
 
 

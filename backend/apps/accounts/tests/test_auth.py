@@ -181,6 +181,26 @@ class LoginTests(TestCase):
         locked_response = self._login()
         self.assertEqual(locked_response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
 
+    def test_lockout_keyed_on_rightmost_forwarded_ip(self):
+        """
+        A client controls everything except the last hop of X-Forwarded-For
+        (nginx appends the real connecting IP there). Varying the earlier,
+        self-supplied entries must not let an attacker dodge the lockout.
+        """
+        for i in range(5):
+            self.client.post(
+                LOGIN_URL,
+                {'username': 'testuser', 'password': 'wrong'},
+                HTTP_X_FORWARDED_FOR=f'{i}.{i}.{i}.{i}, 203.0.113.9',
+            )
+
+        response = self.client.post(
+            LOGIN_URL,
+            {'username': 'testuser', 'password': STRONG_PASSWORD},
+            HTTP_X_FORWARDED_FOR='9.9.9.9, 203.0.113.9',
+        )
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
 
 class LogoutTests(TestCase):
     def setUp(self):
