@@ -5,6 +5,7 @@ import requests
 from celery import shared_task
 from django.conf import settings
 from django.core.mail import send_mail
+from django.db import transaction
 from django.utils import timezone
 
 from .models import Endpoint, CheckResult, Incident, FailedEmail
@@ -15,74 +16,88 @@ logger = logging.getLogger(__name__)
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def check_endpoint(self, endpoint_id):
     """Check a single endpoint and record result, create/close incidents, send alerts."""
-    try:
-        endpoint = Endpoint.objects.get(id=endpoint_id, is_active=True)
-    except Endpoint.DoesNotExist:
-        logger.warning(f"Endpoint {endpoint_id} not found or inactive")
-        return
-
-    # Idempotency: skip if checked too recently (within interval_minutes)
-    last_check = CheckResult.objects.filter(endpoint=endpoint).first()
-    if last_check:
-        elapsed = (timezone.now() - last_check.checked_at).total_seconds() / 60
-        if elapsed < endpoint.interval_minutes:
-            logger.info(f"Skipping {endpoint.name}, last check {elapsed:.1f} min ago")
+    # select_for_update() serializes concurrent checks of the *same* endpoint
+    # (e.g. a "check now" click racing the next Beat tick) so they can't both
+    # pass the idempotency guard below and produce duplicate CheckResults or
+    # duplicate Incidents. The lock is held across the outbound HTTP request,
+    # trading a slightly longer-held row lock for correctness — acceptable at
+    # this project's scale, and scoped to one endpoint's row so other
+    # endpoints' checks proceed unaffected. Note: SQLite (used in dev/tests)
+    # does not enforce row locks, so this only takes effect in Postgres.
+    with transaction.atomic():
+        try:
+            endpoint = Endpoint.objects.select_for_update().get(id=endpoint_id, is_active=True)
+        except Endpoint.DoesNotExist:
+            logger.warning(f"Endpoint {endpoint_id} not found or inactive")
             return
 
-    # Perform HTTP check
-    start_time = timezone.now()
-    try:
-        response = safe_get_request(endpoint.url, timeout=10)
-        is_up = response.status_code < 500
-        status_code = response.status_code
-        response_time = int((timezone.now() - start_time).total_seconds() * 1000)
-    except SSRFError as e:
-        # URL resolves to a private/reserved address (DNS rebinding or stale data).
-        # Do not connect; record a failed check and log a security warning.
-        logger.warning("SSRF blocked for endpoint %s (%s): %s", endpoint.name, endpoint.url, e)
-        is_up = False
-        status_code = None
-        response_time = None
-    except requests.RequestException as e:
-        is_up = False
-        status_code = None
-        response_time = None
-        logger.error(f"Check failed for {endpoint.name}: {e}")
+        # Idempotency: skip if checked too recently (within interval_minutes)
+        last_check = CheckResult.objects.filter(endpoint=endpoint).first()
+        if last_check:
+            elapsed = (timezone.now() - last_check.checked_at).total_seconds() / 60
+            if elapsed < endpoint.interval_minutes:
+                logger.info(f"Skipping {endpoint.name}, last check {elapsed:.1f} min ago")
+                return
 
-    # Save check result
-    check = CheckResult.objects.create(
-        endpoint=endpoint,
-        status_code=status_code,
-        response_time_ms=response_time or 0,
-        is_up=is_up,
-        checked_at=start_time
-    )
+        # Perform HTTP check
+        start_time = timezone.now()
+        try:
+            response = safe_get_request(endpoint.url, timeout=10)
+            is_up = response.status_code < 500
+            status_code = response.status_code
+            response_time = int((timezone.now() - start_time).total_seconds() * 1000)
+        except SSRFError as e:
+            # URL resolves to a private/reserved address (DNS rebinding or stale data).
+            # Do not connect; record a failed check and log a security warning.
+            logger.warning("SSRF blocked for endpoint %s (%s): %s", endpoint.name, endpoint.url, e)
+            is_up = False
+            status_code = None
+            response_time = None
+        except requests.RequestException as e:
+            is_up = False
+            status_code = None
+            response_time = None
+            logger.error(f"Check failed for {endpoint.name}: {e}")
 
-    # Get previous check result
-    previous_check = CheckResult.objects.filter(endpoint=endpoint).exclude(id=check.id).first()
+        # Save check result
+        check = CheckResult.objects.create(
+            endpoint=endpoint,
+            status_code=status_code,
+            response_time_ms=response_time or 0,
+            is_up=is_up,
+            checked_at=start_time
+        )
 
-    # Detect status change
-    status_changed = previous_check and previous_check.is_up != is_up
-    if status_changed:
-        if not is_up:
-            # Outage started
-            incident = Incident.objects.create(
-                endpoint=endpoint,
-                started_at=start_time,
-                resolved=False
-            )
-            # Send alert asynchronously
-            send_alert_email.delay(endpoint.id, incident.id, is_resolved=False)
-        else:
-            # Outage ended
-            incident = Incident.objects.filter(endpoint=endpoint, resolved=False).first()
-            if incident:
-                incident.ended_at = start_time
-                incident.resolved = True
-                incident.save()
-                send_alert_email.delay(endpoint.id, incident.id, is_resolved=True)
+        # Get previous check result
+        previous_check = CheckResult.objects.filter(endpoint=endpoint).exclude(id=check.id).first()
 
-    return check.id
+        # Detect status change
+        status_changed = previous_check and previous_check.is_up != is_up
+        if status_changed:
+            if not is_up:
+                # Outage started
+                incident = Incident.objects.create(
+                    endpoint=endpoint,
+                    started_at=start_time,
+                    resolved=False
+                )
+                # Send alert once the transaction commits, so the worker
+                # picking up the task sees the Incident that already exists.
+                transaction.on_commit(
+                    lambda: send_alert_email.delay(endpoint.id, incident.id, is_resolved=False)
+                )
+            else:
+                # Outage ended
+                incident = Incident.objects.filter(endpoint=endpoint, resolved=False).first()
+                if incident:
+                    incident.ended_at = start_time
+                    incident.resolved = True
+                    incident.save()
+                    transaction.on_commit(
+                        lambda: send_alert_email.delay(endpoint.id, incident.id, is_resolved=True)
+                    )
+
+        return check.id
 
 @shared_task(bind=True, max_retries=2, default_retry_delay=300)
 def send_alert_email(self, endpoint_id, incident_id, is_resolved):
