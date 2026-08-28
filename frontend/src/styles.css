@@ -1,6 +1,39 @@
 @import '@angular/material/prebuilt-themes/indigo-pink.css';
 
-/* Optional global styles */
+/*
+ * Vigil design tokens — "night watch / beacon".
+ * A vigil is a watch kept through the night; the palette carries that
+ * literally: a navy "night" surface for brand moments (header, auth) and a
+ * warm amber "beacon" accent for the signal that's being watched for.
+ * Status colors (up/down/pending) stay close to convention on purpose —
+ * this is a monitoring tool, not the place to be clever with red/green.
+ */
+:root {
+  --ink-950: #0b1220;
+  --navy-800: #121d33;
+  --navy-700: #1a2740;
+  --navy-600: #24365490;
+
+  --paper-0: #f7f8fa;
+  --paper-100: #eceff3;
+  --paper-200: #dde1e8;
+
+  --beacon-500: #f5a524;
+  --beacon-600: #db8b0c;
+  --beacon-100: #fdecd1;
+
+  --up-500: #2fae66;
+  --up-100: #e3f5eb;
+  --down-500: #e0473f;
+  --down-100: #fbe6e5;
+  --pending-500: #8b94a7;
+  --pending-100: #eaecf0;
+
+  --font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
+  --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -8,6 +41,88 @@
 }
 
 body {
-  font-family: Roboto, "Helvetica Neue", sans-serif;
-  background-color: #f5f5f5;
+  font-family: var(--font-body);
+  background-color: var(--paper-0);
+  color: var(--ink-950);
+}
+
+/* Reskin Material's primary-colored controls to the beacon accent instead of
+   the stock indigo-pink theme, without pulling in Sass/M3 theming tooling
+   for what is otherwise a small, deliberate palette swap. */
+.mat-mdc-raised-button.mat-primary,
+.mat-mdc-unelevated-button.mat-primary,
+.mat-mdc-fab.mat-primary {
+  --mdc-protected-button-container-color: var(--beacon-500);
+  --mdc-protected-button-label-text-color: var(--ink-950);
+  --mdc-filled-button-container-color: var(--beacon-500);
+  --mdc-filled-button-label-text-color: var(--ink-950);
+  /* The prebuilt M2 indigo-pink theme sets a literal background-color on
+     this selector rather than reading the MDC custom properties above, so
+     the token overrides alone don't win — pin the actual colors too. */
+  background-color: var(--beacon-500) !important;
+  color: var(--ink-950) !important;
+  font-family: var(--font-body);
+  font-weight: 600;
+}
+
+.mat-mdc-raised-button.mat-primary:hover,
+.mat-mdc-unelevated-button.mat-primary:hover {
+  --mdc-protected-button-container-color: var(--beacon-600);
+  --mdc-filled-button-container-color: var(--beacon-600);
+  background-color: var(--beacon-600) !important;
+}
+
+.mat-mdc-button:not(.mat-warn),
+.mat-mdc-outlined-button:not(.mat-warn) {
+  --mdc-outlined-button-label-text-color: var(--navy-800);
+  --mdc-text-button-label-text-color: var(--navy-800);
+  font-family: var(--font-body);
+}
+
+.mat-mdc-form-field {
+  font-family: var(--font-body);
+  --mdc-outlined-text-field-focus-outline-color: var(--beacon-500);
+  --mdc-outlined-text-field-caret-color: var(--beacon-500);
+  --mat-select-focused-arrow-color: var(--beacon-500);
+}
+
+/* Same story as the buttons above: the underlying focus/active-indicator
+   color for both form-field appearances (fill and outline) is set as a
+   literal color by the prebuilt theme, not read from the MDC variables. */
+.mat-mdc-form-field.mat-focused .mdc-floating-label,
+.mat-mdc-form-field.mat-focused .mdc-notched-outline__leading,
+.mat-mdc-form-field.mat-focused .mdc-notched-outline__notch,
+.mat-mdc-form-field.mat-focused .mdc-notched-outline__trailing {
+  color: var(--beacon-600) !important;
+  border-color: var(--beacon-500) !important;
+}
+.mat-mdc-form-field.mat-focused .mdc-line-ripple::after {
+  border-bottom-color: var(--beacon-500) !important;
+}
+
+.mat-mdc-slide-toggle {
+  --mdc-switch-selected-track-color: var(--navy-700);
+  --mdc-switch-selected-handle-color: var(--navy-800);
+  --mdc-switch-selected-hover-track-color: var(--navy-700);
+  --mdc-switch-selected-hover-handle-color: var(--navy-800);
+  --mdc-switch-selected-icon-color: #fff;
+}
+.mat-mdc-slide-toggle .mdc-switch__track::after {
+  background-color: var(--navy-700) !important;
+  border-color: var(--navy-700) !important;
+}
+.mat-mdc-slide-toggle .mdc-switch--selected .mdc-switch__handle::after {
+  background-color: var(--navy-800) !important;
+}
+
+.mat-mdc-progress-bar {
+  --mdc-linear-progress-active-indicator-color: var(--beacon-500);
+}
+
+.mat-mdc-card {
+  font-family: var(--font-body);
+}
+
+h1, h2, h3, .display {
+  font-family: var(--font-display);
 }

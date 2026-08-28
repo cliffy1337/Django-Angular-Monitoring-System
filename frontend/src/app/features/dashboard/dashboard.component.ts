@@ -22,7 +22,6 @@ Chart.register(...registerables);
 
 interface StatusInfo {
   label: string;
-  icon: string;
   cssClass: string;
 }
 
@@ -33,10 +32,10 @@ interface EndpointRow {
 }
 
 function endpointStatus(check: CheckResult | undefined): StatusInfo {
-  if (!check) return { label: 'Pending', icon: 'schedule', cssClass: 'status-pending' };
+  if (!check) return { label: 'Pending', cssClass: 'status-pending' };
   return check.is_up
-    ? { label: 'Up',   icon: 'check_circle', cssClass: 'status-up'   }
-    : { label: 'Down', icon: 'cancel',        cssClass: 'status-down' };
+    ? { label: 'Up',   cssClass: 'status-up'   }
+    : { label: 'Down', cssClass: 'status-down' };
 }
 
 @Component({
@@ -49,36 +48,39 @@ function endpointStatus(check: CheckResult | undefined): StatusInfo {
     MatProgressBarModule,
   ],
   template: `
-    <div class="dashboard">
-      <div class="header">
-        <h1>Uptime Monitor</h1>
-        <div class="header-actions">
-          <button mat-raised-button color="primary" (click)="openEndpointForm()">+ Add Endpoint</button>
-          <button mat-stroked-button (click)="logout()">Logout</button>
-        </div>
+    <header class="topbar">
+      <div class="wordmark">
+        <span class="beacon-mark" aria-hidden="true"></span>
+        <span class="wordmark-text">VIGIL</span>
       </div>
+      <div class="header-actions">
+        <button mat-raised-button color="primary" (click)="openEndpointForm()">+ Add Endpoint</button>
+        <button mat-stroked-button class="logout-btn" (click)="logout()">Logout</button>
+      </div>
+    </header>
 
+    <div class="dashboard">
       @if (loading()) {
         <mat-progress-bar mode="indeterminate" aria-label="Loading dashboard data"></mat-progress-bar>
       }
 
       @if (!loading()) {
         <div class="summary" role="region" aria-label="Summary">
-          <mat-card>
+          <mat-card class="stat-card stat-total">
             <mat-card-content>
-              <div class="stat-label">Total</div>
+              <div class="stat-label">Total endpoints</div>
               <div class="big-number">{{ rows().length }}</div>
             </mat-card-content>
           </mat-card>
-          <mat-card>
+          <mat-card class="stat-card stat-up">
             <mat-card-content>
-              <div class="stat-label">Up</div>
+              <div class="stat-label">Up now</div>
               <div class="big-number">{{ upCount() }}</div>
             </mat-card-content>
           </mat-card>
-          <mat-card>
+          <mat-card class="stat-card stat-down">
             <mat-card-content>
-              <div class="stat-label">Down</div>
+              <div class="stat-label">Down now</div>
               <div class="big-number">{{ downCount() }}</div>
             </mat-card-content>
           </mat-card>
@@ -117,14 +119,14 @@ function endpointStatus(check: CheckResult | undefined): StatusInfo {
 
             <ng-container matColumnDef="url">
               <th mat-header-cell *matHeaderCellDef>URL</th>
-              <td mat-cell *matCellDef="let row">{{ row.endpoint.url }}</td>
+              <td mat-cell *matCellDef="let row" class="url-cell">{{ row.endpoint.url }}</td>
             </ng-container>
 
             <ng-container matColumnDef="status">
               <th mat-header-cell *matHeaderCellDef>Status</th>
               <td mat-cell *matCellDef="let row">
                 <span [ngClass]="row.status.cssClass" class="status-badge">
-                  <mat-icon class="badge-icon" aria-hidden="true">{{ row.status.icon }}</mat-icon>
+                  <span class="beacon-dot" aria-hidden="true"></span>
                   {{ row.status.label }}
                 </span>
               </td>
@@ -159,37 +161,84 @@ function endpointStatus(check: CheckResult | undefined): StatusInfo {
     </div>
   `,
   styles: [`
-    .dashboard { padding: 20px; max-width: 1200px; margin: 0 auto; }
-
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .topbar {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 16px 24px; background: var(--navy-800);
+    }
+    .wordmark { display: flex; align-items: center; gap: 8px; }
+    .beacon-mark {
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--beacon-500);
+      box-shadow: 0 0 0 4px rgba(245, 165, 36, 0.18);
+    }
+    .wordmark-text {
+      font-family: var(--font-display); font-weight: 700; font-size: 18px;
+      letter-spacing: 0.14em; color: #fff;
+    }
     .header-actions { display: flex; gap: 8px; align-items: center; }
+    .logout-btn { color: rgba(255,255,255,0.85); border-color: rgba(255,255,255,0.3); }
+
+    .dashboard { padding: 24px; max-width: 1200px; margin: 0 auto; }
 
     .summary { display: flex; gap: 16px; margin-bottom: 24px; }
-    .summary mat-card { flex: 1; }
+    .stat-card { flex: 1; border-top: 3px solid var(--paper-200); }
+    .stat-total { border-top-color: var(--navy-800); }
+    .stat-up    { border-top-color: var(--up-500); }
+    .stat-down  { border-top-color: var(--down-500); }
     .stat-label {
-      font-size: 11px; font-weight: 500; letter-spacing: 0.08em;
+      font-family: var(--font-body);
+      font-size: 11px; font-weight: 600; letter-spacing: 0.08em;
       text-transform: uppercase; color: rgba(0,0,0,0.54);
     }
-    .big-number { font-size: 48px; font-weight: 300; line-height: 1.2; margin-top: 4px; }
+    .big-number {
+      font-family: var(--font-mono); font-size: 40px; font-weight: 500;
+      line-height: 1.2; margin-top: 4px; color: var(--ink-950);
+    }
 
     mat-card { margin-bottom: 24px; }
     table { width: 100%; }
+    .url-cell { font-family: var(--font-mono); font-size: 13px; color: rgba(0,0,0,0.7); }
 
     .status-badge {
-      display: inline-flex; align-items: center; gap: 4px;
+      display: inline-flex; align-items: center; gap: 8px;
       font-weight: 500; font-size: 14px;
     }
-    .badge-icon { font-size: 16px; width: 16px; height: 16px; line-height: 16px; }
-    .status-up   { color: #2e7d32; }
-    .status-down { color: #b71c1c; }
-    .status-pending { color: #757575; }
+
+    .beacon-dot { position: relative; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .beacon-dot::after {
+      content: ''; position: absolute; inset: -5px; border-radius: 50%;
+      border: 1.5px solid currentColor; opacity: 0;
+    }
+
+    .status-up   { color: var(--up-500); }
+    .status-up .beacon-dot { background: var(--up-500); }
+    .status-up .beacon-dot::after { animation: beacon-pulse 2.2s ease-out infinite; }
+
+    .status-down .beacon-dot { background: var(--down-500); }
+    .status-down { color: var(--down-500); }
+
+    .status-pending { color: var(--pending-500); }
+    .status-pending .beacon-dot { background: var(--pending-500); animation: beacon-fade 2.2s ease-in-out infinite; }
+
+    @keyframes beacon-pulse {
+      0%   { transform: scale(0.6); opacity: 0.55; }
+      100% { transform: scale(1.6); opacity: 0; }
+    }
+    @keyframes beacon-fade {
+      0%, 100% { opacity: 0.35; }
+      50%      { opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .beacon-dot::after { animation: none !important; }
+      .status-pending .beacon-dot { animation: none !important; }
+    }
 
     .empty-state { text-align: center; padding: 48px 24px; }
     .empty-icon {
       font-size: 56px; width: 56px; height: 56px;
-      color: rgba(0,0,0,0.26); display: block; margin: 0 auto 16px;
+      color: var(--paper-200); display: block; margin: 0 auto 16px;
     }
-    .empty-state h2 { margin: 0 0 8px; font-weight: 400; }
+    .empty-state h2 { margin: 0 0 8px; font-weight: 600; }
     .empty-state p  { color: rgba(0,0,0,0.54); margin: 0 0 24px; }
   `],
 })
@@ -261,7 +310,7 @@ export class DashboardComponent implements OnInit {
           datasets: [{
             label: 'Response time (ms)',
             data: latestChecks.map(c => c.response_time_ms),
-            borderColor: '#3f51b5',
+            borderColor: '#db8b0c',
             fill: false,
           }],
         },
