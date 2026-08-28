@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, Inject, signal, computed, effect } from '@angular/core';
+import { Component, OnInit, inject, Inject, signal, computed, effect, viewChild, ElementRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, ReactiveFormsModule, Validators, FormGroup } from '@angular/forms';
 import { MatCardModule } from '@angular/material/card';
@@ -103,7 +103,9 @@ function endpointStatus(check: CheckResult | undefined): StatusInfo {
       @if (!loading() && checks().length > 0) {
         <mat-card>
           <mat-card-title>Response Time (last 20 checks)</mat-card-title>
-          <canvas id="responseChart" aria-label="Response time chart" role="img"></canvas>
+          <div class="chart-container">
+            <canvas #responseChartRef aria-label="Response time chart" role="img"></canvas>
+          </div>
         </mat-card>
       }
 
@@ -196,6 +198,7 @@ function endpointStatus(check: CheckResult | undefined): StatusInfo {
     }
 
     mat-card { margin-bottom: 24px; }
+    .chart-container { position: relative; height: 280px; padding: 16px 8px 8px; }
     table { width: 100%; }
     .url-cell { font-family: var(--font-mono); font-size: 13px; color: rgba(0,0,0,0.7); }
 
@@ -255,6 +258,7 @@ export class DashboardComponent implements OnInit {
 
   displayedColumns = ['name', 'url', 'status', 'actions'];
   chart: Chart | null = null;
+  chartCanvas = viewChild<ElementRef<HTMLCanvasElement>>('responseChartRef');
 
   private checkMap = computed(() => {
     const map = new Map<string, CheckResult>();
@@ -300,10 +304,16 @@ export class DashboardComponent implements OnInit {
 
   updateChart() {
     const latestChecks = this.checks().slice(0, 20).reverse();
-    const ctx = document.getElementById('responseChart') as HTMLCanvasElement;
-    if (this.chart) this.chart.destroy();
-    if (ctx && latestChecks.length > 0) {
-      this.chart = new Chart(ctx, {
+    // Read the canvas via a signal-based viewChild, not document.getElementById:
+    // the <canvas> only exists once the @if(checks().length > 0) block has
+    // rendered it, and there's no guarantee that's happened yet the moment
+    // this effect fires on a checks() change. viewChild() is itself a signal,
+    // so once the canvas mounts, this effect re-runs and picks it up —
+    // document.getElementById would just silently find nothing and never retry.
+    const canvasRef = this.chartCanvas();
+    if (this.chart) { this.chart.destroy(); this.chart = null; }
+    if (canvasRef && latestChecks.length > 0) {
+      this.chart = new Chart(canvasRef.nativeElement, {
         type: 'line',
         data: {
           labels: latestChecks.map(c => new Date(c.checked_at).toLocaleTimeString()),
@@ -313,6 +323,10 @@ export class DashboardComponent implements OnInit {
             borderColor: '#db8b0c',
             fill: false,
           }],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
         },
       });
     }

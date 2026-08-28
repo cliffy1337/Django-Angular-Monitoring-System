@@ -126,6 +126,24 @@ describe('DashboardComponent', () => {
     });
   });
 
+  describe('response time chart', () => {
+    it('constructs a Chart instance once check data and the canvas are both available', () => {
+      // Regression test: updateChart() used to look up the canvas via
+      // document.getElementById, which raced the @if block that renders it —
+      // the chart silently never got created. chartCanvas() is a viewChild
+      // signal, so the effect must re-run once the canvas actually mounts.
+      const fixture = setup([mockEndpoint], [mockCheckUp]);
+      fixture.detectChanges();
+      expect(fixture.nativeElement.querySelector('canvas')).not.toBeNull();
+      expect(fixture.componentInstance.chart).not.toBeNull();
+    });
+
+    it('does not render a chart when there is no check data yet', () => {
+      const el: HTMLElement = setup([mockEndpoint], []).nativeElement;
+      expect(el.querySelector('canvas')).toBeNull();
+    });
+  });
+
   describe('status display', () => {
     it('shows Pending for an endpoint with no check result', () => {
       const el: HTMLElement = setup([mockEndpoint], []).nativeElement;
