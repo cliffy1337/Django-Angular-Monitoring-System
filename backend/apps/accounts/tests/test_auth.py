@@ -120,6 +120,25 @@ class LoginTests(TestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('token', response.data)
 
+    def test_login_rotates_an_already_expired_token(self):
+        """
+        Logging in must never hand back a token that is already expired.
+        get_or_create() alone would return the stale row unchanged if the
+        user's previous token was never used (and so never lazily deleted
+        by ExpiringTokenAuthentication) after AUTH_TOKEN_EXPIRY_HOURS elapsed.
+        """
+        stale = Token.objects.create(user=self.user)
+        Token.objects.filter(pk=stale.pk).update(
+            created=timezone.now() - timedelta(hours=25)
+        )
+
+        response = self._login()
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        new_token = Token.objects.get(user=self.user)
+        self.assertNotEqual(new_token.key, stale.key)
+        self.assertEqual(response.data['token'], new_token.key)
+
     def test_token_endpoint_also_protected(self):
         """The /api/auth/token/ alias also goes through LoginView."""
         response = self._login(url=TOKEN_URL)

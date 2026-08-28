@@ -10,7 +10,18 @@ from rest_framework.response import Response
 from rest_framework.throttling import AnonRateThrottle
 from rest_framework.views import APIView
 
+from .authentication import is_token_expired
+
 User = get_user_model()
+
+
+def _issue_token(user):
+    """Return a valid auth token for *user*, rotating it if the existing one has expired."""
+    token, created = Token.objects.get_or_create(user=user)
+    if not created and is_token_expired(token):
+        token.delete()
+        token = Token.objects.create(user=user)
+    return token
 
 
 class LoginRateThrottle(AnonRateThrottle):
@@ -90,7 +101,7 @@ class LoginView(ObtainAuthToken):
         # Successful auth — clear the failure counter
         cache.delete(cache_key)
         user = serializer.validated_data['user']
-        token, _ = Token.objects.get_or_create(user=user)
+        token = _issue_token(user)
         return Response({'token': token.key})
 
     @staticmethod
