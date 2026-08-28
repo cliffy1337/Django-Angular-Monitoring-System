@@ -27,15 +27,28 @@ tracking, email reliability, and a reactive frontend — rather than to cover ma
 
 ### Dashboard
 
+Total, up, and down counts, a response-time trend across recent checks, and every monitored
+endpoint with its live status in one place. The endpoint below is genuinely down in this
+screenshot — Vigil caught it and an alert email already went out.
+
 ![Dashboard](docs/screenshots/dashboard.png)
 
 ### Endpoint list
+
+Status is never ambiguous: up, down, or pending its first check.
 
 ![Endpoints](docs/screenshots/endpoints.png)
 
 ### Add endpoint
 
+A name and a URL are all it takes to start monitoring. The URL is validated against SSRF
+(private IPs, loopback, cloud metadata endpoints) before it's ever saved.
+
 ![Add endpoint](docs/screenshots/capture_endpoint.png)
+
+### Login
+
+![Login](docs/screenshots/login.png)
 
 ---
 
